@@ -2,13 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
-	"os"
 )
 
-type ViaCep struct {
+type ViaCEP struct {
 	Cep         string `json:"cep"`
 	Logradouro  string `json:"logradouro"`
 	Complemento string `json:"complemento"`
@@ -22,28 +20,44 @@ type ViaCep struct {
 }
 
 func main() {
-	for _, url := range os.Args[1:] {
-		req, err := http.Get("https://viacep.com.br/ws/" + url + "/json/")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Erro ao fazer a requisição: %v\n", err)
+	http.HandleFunc("/", BuscaCepHandler)
+	http.ListenAndServe(":8080", nil)
+}
 
-		}
-		defer req.Body.Close()
-		res, err := io.ReadAll(req.Body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Erro ao ler resposta: %v\n", err)
-		}
-		var data ViaCep
-		err = json.Unmarshal(res, &data)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Erro ao fazer parse da resposta: %v\n", err)
-		}
-		file, err := os.Create("cidade.txt")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Erro ao criar arquivo: %v\n", err)
-		}
-		defer file.Close()
-		_, err = file.WriteString(fmt.Sprintf("Cep: %s, Localidade: %s, UF: %s", data.Cep, data.Localidade, data.Uf))
-		fmt.Println("Cidade: ", data.Localidade)
+func BuscaCepHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
+	cepParam := r.URL.Query().Get("cep")
+	if cepParam == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	cep, error := BuscaCep(cepParam)
+	if error != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(cep)
+}
+
+func BuscaCep(cep string) (*ViaCEP, error) {
+	resp, error := http.Get("https://viacep.com.br/ws/" + cep + "/json/")
+	if error != nil {
+		return nil, error
+	}
+	defer resp.Body.Close()
+	body, error := ioutil.ReadAll(resp.Body)
+	if error != nil {
+		return nil, error
+	}
+	var c ViaCEP
+	error = json.Unmarshal(body, &c)
+	if error != nil {
+		return nil, error
+	}
+	return &c, nil
 }
